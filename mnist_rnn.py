@@ -19,6 +19,15 @@ class RNNClassifier(nn.Module):
 
     将 28×28 的图片看作 28 个时间步（每一行一个 step），
     每个时间步输入维度为 28（一行有 28 个像素）。
+
+    Args:
+        input_size: 每个时间步的输入特征数（MNIST 一行像素数）
+        hidden_size: 隐藏层神经元数量
+        num_layers: RNN 堆叠层数
+        num_classes: 分类类别数（MNIST 为 0-9）
+        rnn_type: 循环单元类型 — "rnn", "lstm", "gru"
+        bidirectional: 是否使用双向 RNN
+        dropout: 除最后一层外，各层之间的 dropout 概率
     """
 
     def __init__(
@@ -32,7 +41,9 @@ class RNNClassifier(nn.Module):
         dropout: float = 0.0,
     ):
         super().__init__()
+        # 支持的 RNN 类型映射表
         rnn_cls = {"rnn": nn.RNN, "lstm": nn.LSTM, "gru": nn.GRU}
+        # 校验传入的 rnn_type 是否合法
         if rnn_type not in rnn_cls:
             raise ValueError(f"rnn_type 必须为 {list(rnn_cls.keys())}，传入：{rnn_type}")
 
@@ -42,29 +53,36 @@ class RNNClassifier(nn.Module):
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
 
+        # 构造 RNN 层：batch_first=True 表示输入形状为 (batch, seq, feature)
         self.rnn = rnn_cls[rnn_type](
             input_size=input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
             bidirectional=bidirectional,
+            # PyTorch 要求 num_layers=1 时 dropout 必须为 0
             dropout=dropout if num_layers > 1 else 0,
         )
+        # 全连接输出层：将 RNN 最后一层的隐状态映射到类别分数
         self.fc = nn.Linear(hidden_size * num_directions, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: (batch, 28, 28) or (batch, 1, 28, 28)
+        # x 可能来自 DataLoader，形状为 (batch, 1, 28, 28)，
+        # 需要压缩通道维变为 (batch, 28, 28)
         if x.dim() == 4:
             x = x.squeeze(1)
+        # 前向传播，out 是各时间步输出，hn 是最后一层隐状态
         out, hn = self.rnn(x)
 
         if self.rnn_type == "lstm":
-            hn = hn[0]  # LSTM 返回 (h_n, c_n)，取 h_n
+            # LSTM 返回 (h_n, c_n) 元组，分类只需要 h_n
+            hn = hn[0]
 
         # hn shape: (num_layers * num_directions, batch, hidden_size)
-        # 取最后一层
+        # 取最后一层的隐状态用于分类
+        # 单向：用 hn[-1]；双向：拼接最后前向层 hn[-2] 和最后反向层 hn[-1]
         h_last = hn[-1] if not self.bidirectional else torch.cat([hn[-2], hn[-1]], dim=-1)
-        # h_last: (batch, hidden_size * num_directions)
+        # 经过全连接层得到各类别 logits，形状 (batch, num_classes)
         logits = self.fc(h_last)
         return logits
 
