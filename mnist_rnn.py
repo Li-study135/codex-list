@@ -75,7 +75,7 @@ class RNNClassifier(nn.Module):
 def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> tuple[float, float]:
     model.eval()
     correct, total, loss_sum = 0, 0, 0.0
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.MSELoss()
     for x, y in loader:
         x, y = x.to(device), y.to(device)
         logits = model(x)
